@@ -1,0 +1,355 @@
+---
+title: "RegressionSensitivityAnalysisR"
+output: html_notebook
+---
+Load in packages and data
+```{r}
+library(MCMCglmm)
+library(tidyverse)
+library(cowplot)
+library(readxl)
+library(BSDA)
+library(scales)
+
+RegressionData <- as_tibble(read_excel("<data path>")) #path to regression data in .xlsx table
+
+#parameters for plotting figures
+cap_width <- .01 
+titlesize <- 10
+labelsize <- 3
+
+
+SimNum <-  5000 #number or iterations for Monte Carlo simulation. Lower to decrease run time 
+RSD <- c(1E-8,.025,.05,.075,.1,.125,.15,.175,.2,.225,.25,.275,.3,.325,.35) #Steps for magnitude of random normalized error. First step is negligably small to prevent divide by 0
+set.seed(12345) #set seed for reproducible results
+
+```
+
+Run Monte Carlo Simulation for 14C vs HS regression
+```{r}
+length <- length(RegressionData$C14)
+c <- 1
+
+#initialize matrices for simulation results
+slope_matrix14 <- matrix(nrow = SimNum, ncol = length(RSD))
+intercept_matrix14 <- matrix(nrow = SimNum, ncol = length(RSD))
+slopesd_matrix14 <- matrix(nrow = SimNum, ncol = length(RSD))
+interceptsd_matrix14 <- matrix(nrow = SimNum, ncol = length(RSD))
+
+#Monte Carlo Simulation. May time a while to run
+for(j in RSD){
+  
+  for(i in 1:SimNum){
+    x <- rtnorm(length(RegressionData$HS), mean = RegressionData$HS, sd = j*RegressionData$HS, lower = 0, upper = 1)
+
+    m <- lm(RegressionData$C14 ~ x)
+
+    slope_matrix14[i,c] <- coef(m)[2]
+    slopesd_matrix14[i,c] <- sqrt(diag(vcov(m)))[2]
+    intercept_matrix14[i,c] <- coef(m)[1]
+    interceptsd_matrix14[i,c] <- sqrt(diag(vcov(m)))[1]
+    
+  }
+  c=c+1
+}
+
+#Removes uneeded variables
+rm(list <- c('i','m','c','j', 'x','length'))
+
+```
+
+Calculate Error Threshold for Slope
+```{r}
+
+regC14 <- lm(RegressionData$C14~RegressionData$HS) #compute C14 vs HS regression
+slope_ttest_14 =  matrix(nrow = length(RSD), ncol = 1)
+
+#perform t-test for all random error levels to determine which level deviates significantly from linear regression
+for (j in 1:length(RSD)){
+  test <- tsum.test(mean.x <- mean(slope_matrix14[,j]),
+                 s.x <- sd(slope_matrix14[,j]),
+                 n.x <- SimNum,
+                 mean.y <- regC14$coefficients[2],
+                 s.y <- sqrt(diag(vcov(regC14)))[2],
+                 n.y <- length(RegressionData$C14))
+  slope_ttest_14[j] <- test$p.value 
+}
+
+#Removes uneeded variables
+rm(list <- c('j', 'test'))
+```
+
+Graph of Slope vs Error
+```{r}
+#Finds the mean and standard of the monte carlo simulated values for each error increment
+mslope14 <- colMeans(slope_matrix14)
+sdslope14 <- apply(slope_matrix14, 2, sd)
+
+slope14C <- ggplot()+
+  geom_point(aes(x = RSD, y = mslope14))+
+  geom_line(aes(x = RSD, y = mslope14))+
+  geom_errorbar(aes(x = RSD, y = mslope14, ymin = mslope14-sdslope14, ymax = mslope14+sdslope14), width = cap_width)+
+  geom_rect(aes(xmin =RSD[match(max(slope_ttest_14[slope_ttest_14<0.05]),slope_ttest_14)], 
+                ymin = min(mslope14-sdslope14),
+                xmax = 0.35, ymax = max(mslope14+sdslope14)),
+            fill = 'maroon',alpha = .2 )+
+  annotate("text", x = 0, y = max(mslope14+sdslope14), label = "A", hjust = 0, size = labelsize)+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  theme_classic()+
+  theme(axis.title = element_text(size = titlesize),
+    axis.title.x = element_blank())+
+  labs(y = "Slope")
+
+
+slope14C
+
+```
+Graph of Slope Error vs Error
+```{r}
+mslopesd14 <- colMeans(slopesd_matrix14)
+sdslopesd14 <- apply(slopesd_matrix14, 2, sd)
+
+slope_error14C = ggplot()+
+  geom_point(aes(x = RSD, y = mslopesd14))+
+  geom_line(aes(x = RSD, y = mslopesd14))+
+  geom_errorbar(aes(x = RSD, y = mslopesd14, ymin = mslopesd14-sdslopesd14, ymax = mslopesd14+sdslopesd14),
+                width = cap_width)+
+  annotate("text", x = 0, y = max(mslopesd14+sdslopesd14), label = "B", hjust = 0, size = labelsize)+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  theme_classic()+
+  theme(axis.title = element_text(size = titlesize),
+    axis.title.x = element_blank())+
+  labs(y = "Error of the Slope")
+
+slope_error14C
+```
+Calculate Error Threshold for Intercept
+```{r}
+intercept_ttest_14 <-  matrix(nrow = length(RSD), ncol = 1)
+
+for (j in 1:length(RSD)){
+  test <- tsum.test(mean.x <- mean(intercept_matrix14[,j]),
+                 s.x <- sd(intercept_matrix14[,j]),
+                 n.x <- SimNum,
+                 mean.y <- regC14$coefficients[1],
+                 s.y <- sqrt(diag(vcov(regC14)))[1],
+                 n.y <- length(RegressionData$C14))
+  intercept_ttest_14[j] <- test$p.value
+}
+
+rm(list = c('j', 'test'))
+```
+
+Graph of Intercept vs Error
+```{r}
+mintercept14 <- colMeans(intercept_matrix14)
+sdintercept14 <- apply(intercept_matrix14, 2, sd)
+
+intercept14C <- ggplot()+
+  geom_point(aes(x = RSD, y = mintercept14))+
+  geom_line(aes(x = RSD, y = mintercept14))+
+  geom_errorbar(aes(x = RSD, y = mintercept14, ymin = mintercept14-sdintercept14, ymax = mintercept14+sdintercept14), width = cap_width)+
+  geom_rect(aes(xmin = RSD[match(max(intercept_ttest_14[intercept_ttest_14<0.05]),intercept_ttest_14)], ymin = min(mintercept14-sdintercept14),
+                xmax = 0.35, ymax = max(mintercept14+sdintercept14)),
+            fill = 'maroon',alpha = .2 )+
+  annotate("text", x = 0, y = max((mintercept14+sdintercept14)*1.1), label = "C", hjust = 0, size = labelsize)+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  theme_classic()+
+  labs(x = 'Percent Relative Error on HS Content', y = "Intercept")
+
+intercept14C
+```
+Graph of Intercept Error vs Intercept
+```{r}
+minterceptsd14 <- colMeans(interceptsd_matrix14)
+sdinterceptsd14 <- apply(interceptsd_matrix14, 2, sd)
+
+intercept_error14C <- ggplot()+
+  geom_point(aes(x = RSD, y = minterceptsd14))+
+  geom_line(aes(x = RSD, y = minterceptsd14))+
+  geom_errorbar(aes(x = RSD, y = minterceptsd14, ymin = minterceptsd14-sdinterceptsd14, ymax = minterceptsd14+sdinterceptsd14), width = cap_width)+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  annotate("text", x = 0, y = max(minterceptsd14+sdinterceptsd14), label = "D", hjust = 0, size = labelsize)+
+  theme_classic()+
+  labs(x = 'Percent Relative Error on HS Content', y = "Error of the Intercept")
+
+intercept_error14C
+```
+Combine Graphs and Save as .png
+```{r}
+sensitivity_plots14C = plot_grid(slope14C, slope_error14C, intercept14C, intercept_error14C, nrow = 2)
+sensitivity_plots14C
+
+ggsave(plot = sensitivity_plots14C,
+       filename = "Sensitivity Plots 14C.png",
+       path = "<file path>", #change to path where you want file stored
+       width = 6,
+       height = 4,
+       unit = 'in',
+       dpi = 300) 
+```
+Run Monte Carlo Simulation for 13C vs HS regression
+```{r}
+length <- length(RegressionData$C13)
+c <- 1
+
+slope_matrix13 <- matrix(nrow = SimNum, ncol = length(RSD))
+intercept_matrix13 <- matrix(nrow = SimNum, ncol = length(RSD))
+slopesd_matrix13 <- matrix(nrow = SimNum, ncol = length(RSD))
+interceptsd_matrix13 <- matrix(nrow = SimNum, ncol = length(RSD))
+
+for(j in RSD){
+  
+  for(i in 1:SimNum){
+    x <- rtnorm(length(RegressionData$HS), mean = RegressionData$HS, sd = j*RegressionData$HS, lower = 0, upper = 1)
+
+    m <- lm(RegressionData$C13 ~ x)
+
+    slope_matrix13[i,c] <- coef(m)[2]
+    slopesd_matrix13[i,c] <- sqrt(diag(vcov(m)))[2]
+    intercept_matrix13[i,c] <- coef(m)[1]
+    interceptsd_matrix13[i,c] <- sqrt(diag(vcov(m)))[1]
+    
+  }
+  c <- c+1
+}
+rm(list = c('i','m','c','j', 'x','length'))
+
+```
+
+Calculate Error Threshold for Slope
+```{r}
+regC13 <- lm(RegressionData$C13~RegressionData$HS)
+slope_ttest_13 <-  matrix(nrow = length(RSD), ncol = 1)
+
+for (j in 1:length(RSD)){
+  test <- tsum.test(mean.x <- mean(slope_matrix13[,j]),
+                 s.x <- sd(slope_matrix13[,j]),
+                 n.x <- SimNum,
+                 mean.y <- regC13$coefficients[2],
+                 s.y <- sqrt(diag(vcov(regC13)))[2],
+                 n.y <- length(RegressionData$C13))
+  slope_ttest_13[j] <- test$p.value
+}
+
+rm(list=c('j', 'test'))
+```
+
+Graph of Slope vs Error
+```{r}
+mslope13 <- colMeans(slope_matrix13)
+sdslope13 <- apply(slope_matrix13, 2, sd)
+
+slope13C <- ggplot()+
+  geom_point(aes(x = RSD, y = mslope13))+
+  geom_line(aes(x = RSD, y = mslope13))+
+  geom_errorbar(aes(x = RSD, y = mslope13, ymin = mslope13-sdslope13, ymax = mslope13+sdslope13), width = cap_width)+
+  annotate("text", x = 0, y = max(mslope13+sdslope13), label = "A", hjust = 0, size = labelsize)+
+  geom_rect(aes(xmin =RSD[match(max(slope_ttest_13[slope_ttest_13<0.05]),slope_ttest_13)], ymin = min(mslope13-sdslope13),
+                xmax = 0.35, ymax = max(mslope13+sdslope13)),
+            fill = 'maroon',alpha = .2 )+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  theme_classic()+
+  theme(axis.title = element_text(size = titlesize),
+        axis.title.x = element_blank())+
+  labs(y = "Slope")
+
+slope13C
+
+```
+
+Graph of Slope Error vs Error
+```{r}
+mslopesd13 <- colMeans(slopesd_matrix13)
+sdslopesd13 <- apply(slopesd_matrix13, 2, sd)
+
+slope_error13C <- ggplot()+
+  geom_point(aes(x = RSD, y = mslopesd13))+
+  geom_line(aes(x = RSD, y = mslopesd13))+
+  geom_errorbar(aes(x = RSD, y = mslopesd13, ymin = mslopesd13-sdslopesd13, ymax = mslopesd13+sdslopesd13), width = cap_width)+
+  annotate("text", x = 0, y = max(mslopesd13+sdslopesd13), label = "B", hjust = 0, size = labelsize)+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  theme_classic()+
+  theme(axis.title = element_text(size = titlesize),
+      axis.title.x = element_blank())+
+  labs( y = "Error of the Slope")
+
+slope_error13C
+```
+
+Calculate Error Threshold for Intercept
+```{r}
+intercept_ttest_13 <- matrix(nrow = length(RSD), ncol = 1)
+
+for (j in 1:length(RSD)){
+  test=tsum.test(mean.x <- mean(intercept_matrix13[,j]),
+                 s.x <- sd(intercept_matrix13[,j]),
+                 n.x <- SimNum,
+                 mean.y <- regC13$coefficients[1],
+                 s.y <- sqrt(diag(vcov(regC13)))[1],
+                 n.y <- length(RegressionData$C13))
+  intercept_ttest_13[j] <- test$p.value
+}
+
+rm(list = c('j', 'test'))
+```
+
+Graph of Intercept vs Error
+```{r}
+mintercept13 <- colMeans(intercept_matrix13)
+sdintercept13 <- apply(intercept_matrix13, 2, sd)
+
+
+intercept13C <- ggplot()+
+  geom_point(aes(x = RSD, y = mintercept13))+
+  geom_line(aes(x = RSD, y = mintercept13))+
+  geom_errorbar(aes(x = RSD, y = mintercept13, ymin = mintercept13-sdintercept13, ymax = mintercept13+sdintercept13), width = cap_width)+
+  annotate("text", x = 0, y = max(mintercept13+sdintercept13), label = "C", hjust = 0, size = labelsize)+
+  geom_rect(aes(xmin = RSD[match(max(intercept_ttest_13[intercept_ttest_13<0.05]),intercept_ttest_13)], ymin = min(mintercept13-sdintercept13),
+                xmax = 0.35, ymax = max(mintercept13+sdintercept13)),
+            fill = 'maroon',alpha = .2 )+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  theme_classic()+
+  labs(x = 'Percent Relative Error on HS Content', y = "Intercept")
+
+intercept13C
+```
+
+Graph of Intercept Error vs Intercept
+```{r}
+minterceptsd13 <- colMeans(interceptsd_matrix13)
+sdinterceptsd13 <- apply(interceptsd_matrix13, 2, sd)
+
+intercept_error13C <- ggplot()+
+  geom_point(aes(x = RSD, y = minterceptsd13))+
+  geom_line(aes(x = RSD, y = minterceptsd13))+
+  geom_errorbar(aes(x = RSD, y = minterceptsd13, ymin = minterceptsd13-sdinterceptsd13, ymax = minterceptsd13+sdinterceptsd13), width = cap_width)+
+  annotate("text", x = 0, y = max(minterceptsd13+sdinterceptsd13), label = "D", hjust = 0, size = labelsize)+
+  scale_x_continuous(breaks = c(0,.1,.2,.3),
+                     labels = c(0,10,20,30))+
+  theme_classic()+
+  labs(x = 'Percent Relative Error on HS Content', y = "Error of the Intercept")
+
+intercept_error13C
+```
+
+Combine Graphs and Save as .png
+```{r}
+sensitivity_plots13 = plot_grid(slope13C, slope_error13C, intercept13C, intercept_error13C, nrow = 2)
+sensitivity_plots13
+
+ggsave(plot = sensitivity_plots13,
+       filename = "Sensitivity Plots_13C.png",
+       path = "<file path>", #change to path were you want output file placed
+       width = 6,
+       height = 4,
+       unit = 'in',
+       dpi = 300) 
+```
