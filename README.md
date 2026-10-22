@@ -1,4 +1,4 @@
-# RegressionSensitivityAnalysisR
+# RegressionSensitivityAnalysisR [![DOI](https://zenodo.org/badge/1086645946.svg)](https://doi.org/10.5281/zenodo.23569489)
 A simple script to run a Monty Carlo simulation to test the sensitivity of a variable in a linear regression to random error associated with the measurement of that variable. This script is related to a paper published in ___________ examining the relationship between molecular weight, chemical composition, and radiocarbon age of high molecular weight dissolved organic matter. It can be found at ___________. This work is based on work by Walker et al. (2016, Nature Geoscience).
 
 # Data Structure
